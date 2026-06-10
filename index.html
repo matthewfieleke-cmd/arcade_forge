@@ -227,11 +227,12 @@ body::after{
 .end-title.win{color:#ffe27d;text-shadow:0 0 14px rgba(255,217,95,.95),0 0 44px rgba(255,217,95,.55);}
 .end-stats{display:flex;flex-direction:column;gap:9px;margin-bottom:30px;}
 .end-stat{
-  display:flex;justify-content:space-between;padding:13px 16px;border-radius:12px;
+  display:flex;justify-content:space-between;align-items:center;gap:16px;
+  padding:13px 16px;border-radius:12px;
   background:rgba(12,16,32,.72);border:1px solid var(--line);
 }
-.end-stat .k{font-size:11px;letter-spacing:2px;color:#6f87a8;align-self:center;}
-.end-stat .v{font-size:16px;letter-spacing:1px;color:#eaffff;}
+.end-stat .k{flex:0 0 auto;font-size:11px;letter-spacing:2px;color:#6f87a8;}
+.end-stat .v{flex:1;font-size:15px;letter-spacing:1px;color:#eaffff;text-align:right;word-break:break-word;}
 </style>
 </head>
 <body>
@@ -2840,10 +2841,10 @@ function drawHUD(){
   }else{
     obj='TARGETS '+G.kills+'/'+G.killQuota;
   }
-  ctx.textAlign='center';
+  ctx.textAlign='right';
   ctx.font='bold 13px "Courier New", monospace';
   ctx.fillStyle='rgba(232,246,255,0.9)';
-  ctx.fillText(obj,viewW/2,topY+12);
+  ctx.fillText(obj,quitBtn.x-quitBtn.r-12,topY+12);
   /* quit control */
   ctx.save();
   ctx.strokeStyle='rgba(255,107,107,0.8)';
