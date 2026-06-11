@@ -686,7 +686,7 @@ const G={
   killQuota:0,maxAlive:0,
   enSpawnT:0,envT:0,
   bannerT:0,bannerText:'',bannerSub:'',
-  dmgFlash:0,levelFlashT:0
+  dmgFlash:0,levelFlashT:0,arenaSeed:1
 };
 const player={
   x:0,y:0,w:30,h:42,baseH:42,vx:0,vy:0,
@@ -699,7 +699,8 @@ const player={
 };
 const enemies=[],projs=[],eprojs=[],platforms=[],walls=[],
       hazards=[],pickups=[],wisps=[],
-      telegraphs=[],clusters=[],solids=[],dmgTexts=[],shockwaves=[];
+      telegraphs=[],clusters=[],solids=[],dmgTexts=[],shockwaves=[],
+      decals=[],decor=[];
 
 const diffMods=()=>DIFFS[G.cfg.diff].mods;
 const envPal=()=>ENVS[G.cfg.env].pal;
@@ -868,6 +869,7 @@ function buildWorld(){
   hazards.length=0;pickups.length=0;wisps.length=0;
   telegraphs.length=0;clusters.length=0;
   solids.length=0;dmgTexts.length=0;shockwaves.length=0;
+  decals.length=0;decor.length=0;
   G.pits.length=0;
   G.lastSafeX=70;
   for(const p of particles)p.active=false;
@@ -886,6 +888,7 @@ function buildWorld(){
     G.worldW=viewW;
     G.groundY=viewH;
     G.camX=0;
+    G.arenaSeed=Math.floor(Math.random()*100000)+lvl*977;
     buildArenaWalls();
     G.killQuota=8+lvl*3;
     G.maxAlive=Math.round((3+lvl*0.7)*D.spawn);
@@ -893,6 +896,7 @@ function buildWorld(){
     player.x=viewW/2-player.w/2;
     player.y=viewH/2-player.h/2;
   }
+  buildDecor();
   G.bannerText='LEVEL '+lvl+' / 10';
   G.bannerSub=g===0?'REACH THE EXIT PORTAL':'PURGE '+G.killQuota+' HOSTILES';
   G.bannerT=2.4;
@@ -1006,6 +1010,59 @@ function buildArenaWalls(){
   walls.push({x:m,y:viewH-m-t,w:viewW-m*2,h:t});
   walls.push({x:m,y:m,w:t,h:viewH-m*2});
   walls.push({x:viewW-m-t,y:m,w:t,h:viewH-m*2});
+  /* random interior cover walls, deterministic per level seed so
+     resizes rebuild the same layout */
+  const seed=G.arenaSeed;
+  const n=2+Math.floor(hash01(seed*7.31)*3);
+  const spawnSafe={x:viewW/2-80,y:viewH/2-80,w:160,h:160};
+  for(let i=0;i<n;i++){
+    const horiz=hash01(seed*3.17+i*9.7)<0.55;
+    const len=horiz?viewW*(0.2+hash01(seed*13.7+i*5.1)*0.2)
+                   :viewH*(0.12+hash01(seed*13.7+i*5.1)*0.1);
+    const ww=horiz?len:14;
+    const wh=horiz?14:len;
+    const wx=30+hash01(seed*5.9+i*7.3)*(viewW-60-ww);
+    const wy=80+hash01(seed*8.3+i*3.9)*(viewH-200-wh);
+    const rect={x:wx,y:wy,w:ww,h:wh};
+    if(rectsOverlap(rect,spawnSafe))continue;
+    walls.push(rect);
+  }
+}
+function groundClearAt(x){
+  /* true when x sits on plain ground level: not over a pit and not
+     covered by an elevated solid (wall, stair, tunnel slab) */
+  if(insidePit(x))return false;
+  const top=rootSurfaceAt(x,-99999);
+  return top!==null&&Math.abs(top-G.groundY)<2;
+}
+function buildDecor(){
+  if(G.cfg.env!==2)return;
+  if(G.cfg.genre===0){
+    const count=Math.round(G.worldW/360);
+    for(let i=0;i<count;i++){
+      let x=0,ok=false;
+      for(let t=0;t<8&&!ok;t++){
+        x=rand(150,G.worldW-200);
+        ok=groundClearAt(x);
+      }
+      if(!ok)continue;
+      decor.push({kind:Math.random()<0.62?'tomb':'lantern',
+        x:x,y:G.groundY,s:0.85+Math.random()*0.5,seed:i});
+    }
+  }else{
+    for(let i=0;i<6;i++){
+      let x=0,y=0,tries=0,ok=false;
+      while(tries<10&&!ok){
+        x=rand(46,viewW-46);
+        y=rand(130,viewH-70);
+        ok=dist2(x,y,viewW/2,viewH/2)>150*150&&
+           !walls.some(w=>circleRectHit(x,y-14,24,w));
+        tries++;
+      }
+      if(ok)decor.push({kind:Math.random()<0.62?'tomb':'lantern',
+        x:x,y:y,s:0.8+Math.random()*0.4,seed:i});
+    }
+  }
 }
 function resolveWalls(ent){
   for(const w of walls){
@@ -1130,6 +1187,7 @@ function update(dt){
   handlePlayerCollisions(dt);
   updateDmgTexts(dt);
   updateShockwaves(dt);
+  updateDecals(dt);
   updateParticles(dt);
   updateCamera(dt);
   checkLevelProgress();
@@ -1415,7 +1473,7 @@ function fireSecondary(){
       projs.push({kind:'yarn',phase:'fly',x:pcx,y:pcy-6,
         vx:dirX*340,vy:-590,r:11,
         dmg:16*dmgMul(),life:9,grav:1150,hitMap:{},spin:0,
-        rollT:0,returnT:0});
+        rollT:0,returnT:0,path:[],pathT:0});
     }
     addShake(3,0.15);
   } else {
@@ -1599,6 +1657,15 @@ function yarnSupportY(p){
 }
 function updateYarn(p,dt){
   const pcx=player.x+player.w/2,pcy=player.y+player.h/2;
+  /* unspooling string trail (platformer) */
+  if(p.path){
+    p.pathT-=dt;
+    if(p.pathT<=0){
+      p.pathT=0.03;
+      p.path.push({x:p.x,y:p.y});
+      if(p.path.length>14)p.path.shift();
+    }
+  }
   if(p.phase==='return'){
     /* boomerang pass back to the cat, piercing everything */
     p.returnT-=dt;
@@ -1689,6 +1756,17 @@ function updateYarn(p,dt){
   }
   /* fly */
   p.vy+=p.grav*dt;
+  /* slight magnetism toward the nearest enemy - a nudge, weak enough
+     to never fight the arc or the boomerang return */
+  const mag=nearestEnemyTo(p.x,p.y,280);
+  if(mag){
+    const mdx=mag.x+mag.w/2-p.x,mdy=mag.y+mag.h/2-p.y;
+    const md=Math.hypot(mdx,mdy)||1;
+    if(md>18){
+      p.vx+=mdx/md*430*dt;
+      p.vy+=mdy/md*230*dt;
+    }
+  }
   p.x+=p.vx*dt;
   p.y+=p.vy*dt;
   const L=G.camX+p.r+2,R=G.camX+viewW-p.r-2;
@@ -1795,7 +1873,7 @@ function updateEnemies(dt){
 
     if(en.type===0){
       /* GHOSTLY SPIRIT - phasing homing floater with afterimage trail */
-      const sp=(42+G.level*4)*spd;
+      const sp=(56+G.level*5)*spd;
       en.vx+=((dx/distP)*sp-en.vx)*Math.min(1,dt*2.2);
       en.vy+=((dy/distP)*sp-en.vy)*Math.min(1,dt*2.2);
       en.x+=en.vx*dt;
@@ -1806,11 +1884,11 @@ function updateEnemies(dt){
       }
       en.trailT-=dt;
       if(en.trailT<=0){
-        en.trailT=0.07;
-        en.trail.push({x:en.x,y:en.y,a:0.32});
-        if(en.trail.length>5)en.trail.shift();
+        en.trailT=0.09;
+        en.trail.push({x:en.x,y:en.y,a:0.34});
+        if(en.trail.length>9)en.trail.shift();
       }
-      for(const tr of en.trail)tr.a-=dt*1.1;
+      for(const tr of en.trail)tr.a-=dt*0.24;
     } else if(en.type===1){
       /* EVIL ROBOT - armored walker / strafer with lasers */
       if(g===1){
@@ -1861,6 +1939,19 @@ function dirtColors(){
   if(env===1)return[[170,180,200],[70,80,105]];
   return[[150,95,200],[60,35,95]];
 }
+function spawnCrack(x,y,flat){
+  const dc=dirtColors();
+  decals.push({x:x,y:y,t:0,life:3.4,flat:flat,
+    size:7+Math.random()*8,rot:Math.random()*TAU,
+    r:Math.round(dc[0][0]*0.5),g:Math.round(dc[0][1]*0.5),b:Math.round(dc[0][2]*0.5)});
+  if(decals.length>40)decals.shift();
+}
+function updateDecals(dt){
+  for(let i=decals.length-1;i>=0;i--){
+    decals[i].t+=dt;
+    if(decals[i].t>=decals[i].life)decals.splice(i,1);
+  }
+}
 function rootSurfaceAt(x,refY){
   /* topmost solid surface at x that sits at/below the reference feet level */
   let best=null;
@@ -1909,7 +2000,8 @@ function updatePlant(en,dt,g,spd,dx,dy,distP,onScreen){
   }
   if(en.rootState==='root'){
     en.rootT+=dt;
-    const sp=(230+G.level*8)*spd;
+    /* digging is slower in the top-down arena */
+    const sp=(g===1?(118+G.level*5):(230+G.level*8))*spd;
     const tx=pcx+en.rootOffX;
     let arrived=false;
     if(g===0){
@@ -1927,11 +2019,17 @@ function updatePlant(en,dt,g,spd,dx,dy,distP,onScreen){
       en.tipY=clamp(en.tipY,30,viewH-30);
       arrived=d<12;
     }
-    if(Math.random()<0.35){
-      spawnParticle(en.tipX+rand(-8,8),(g===0?G.groundY:en.tipY)+rand(-4,2),
-        rand(-30,30),-rand(20,80),2.2,0.3,dc[0],dc[1],160);
+    /* dig wake: dirt spray + cracked ground left behind */
+    if(Math.random()<0.5){
+      spawnParticle(en.tipX+rand(-10,10),(g===0?G.groundY:en.tipY)+rand(-4,2),
+        rand(-40,40),-rand(20,90),2.4,0.35,dc[0],dc[1],170);
     }
-    if(en.rootT>2||(arrived&&en.rootT>0.6)){
+    en.crackT=(en.crackT||0)-dt;
+    if(en.crackT<=0){
+      en.crackT=0.13;
+      spawnCrack(en.tipX,g===0?G.groundY:en.tipY,g===0);
+    }
+    if(en.rootT>(g===1?3.2:2)||(arrived&&en.rootT>0.6)){
       en.lockX=en.tipX;
       if(g===0){
         let sy=rootSurfaceAt(en.lockX,player.y+player.h);
@@ -1939,7 +2037,7 @@ function updatePlant(en,dt,g,spd,dx,dy,distP,onScreen){
         while(sy===null&&tries<10){
           en.lockX+=(en.lockX<pcx?-1:1)*-24;
           en.lockX=clamp(en.lockX,20,G.worldW-20);
-          sy=rootSurfaceAt(en.lockX,viewH+300);
+          sy=rootSurfaceAt(en.lockX,-99999);
           tries++;
         }
         en.lockY=sy===null?G.groundY:sy;
@@ -1984,6 +2082,16 @@ function updateEnemyProjectiles(dt){
   for(let i=eprojs.length-1;i>=0;i--){
     const p=eprojs[i];
     p.life-=dt;
+    if(p.kind==='laser'&&!player.dead){
+      /* slight heat-seeking curve toward the player */
+      const sp=Math.hypot(p.vx,p.vy)||1;
+      const desired=Math.atan2(player.y+player.h/2-p.y,player.x+player.w/2-p.x);
+      let cur=Math.atan2(p.vy,p.vx);
+      const diff=normAngle(desired-cur);
+      cur+=clamp(diff,-1.7*dt,1.7*dt);
+      p.vx=Math.cos(cur)*sp;
+      p.vy=Math.sin(cur)*sp;
+    }
     p.vy+=(p.grav||0)*dt;
     p.x+=p.vx*dt;
     p.y+=p.vy*dt;
@@ -2056,11 +2164,26 @@ function spawnHazard(){
   const pcx=player.x+player.w/2;
   if(env===0){
     if(g===1){
-      hazards.push({kind:'pool',x:rand(60,viewW-60),y:rand(60,viewH-60),
+      /* lava pool: keep it out of the cover walls */
+      let px=0,py=0,tries=0,ok=false;
+      while(tries<12&&!ok){
+        px=rand(60,viewW-60);
+        py=rand(60,viewH-60);
+        ok=!walls.some(w=>circleRectHit(px,py,54,w));
+        tries++;
+      }
+      if(ok)hazards.push({kind:'pool',x:px,y:py,
         r:54,t:0,warn:0.9,live:2.2,dead:false});
     }else{
-      const gx=clamp(pcx+rand(-80,420),G.camX+40,G.camX+viewW+300);
-      hazards.push({kind:'geyser',x:gx,y:G.groundY,w:38,hgt:160,
+      /* geyser: only on open flat ground - never over a pit, never
+         inside a wall / staircase / tunnel footprint */
+      let gx=0,tries=0,ok=false;
+      while(tries<14&&!ok){
+        gx=clamp(pcx+rand(-80,420),G.camX+40,G.camX+viewW+300);
+        ok=groundClearAt(gx-20)&&groundClearAt(gx)&&groundClearAt(gx+20);
+        tries++;
+      }
+      if(ok)hazards.push({kind:'geyser',x:gx,y:G.groundY,w:38,hgt:160,
         t:0,warn:0.8,live:0.9,dead:false});
     }
   } else if(env===1){
@@ -2187,7 +2310,8 @@ function updateSpawners(dt){
           tx=rand(50,viewW-90);
           ty=rand(50,viewH-90);
           tries++;
-        }while(tries<12&&dist2(tx,ty,player.x,player.y)<160*160);
+        }while(tries<14&&(dist2(tx,ty,player.x,player.y)<160*160||
+               walls.some(w=>rectsOverlap({x:tx,y:ty,w:36,h:42},w))));
         telegraphs.push({x:tx,y:ty,t:0.75});
         G.spawned++;
         G.enSpawnT=Math.max(0.4,1.7-G.level*0.09)/D.spawn;
@@ -2404,6 +2528,8 @@ function render(){
   ctx.save();
   ctx.translate(-G.camX+sx,-G.camY+sy);
   drawGeometry();
+  drawDecals();
+  drawDecor();
   drawTelegraphs();
   drawHazards();
   drawPickups();
@@ -2632,43 +2758,7 @@ function drawBackground(){
       ctx.fillRect(bx+bw*0.3,viewH-bh*0.7,14,18);
       ctx.fillStyle='rgba(12,8,20,0.9)';
     }
-    /* graveyard row: tombstones + flickering lanterns */
-    for(let i=0;i<7;i++){
-      const tx=((i*viewW*0.23-G.camX*0.5)%(viewW*1.5)+viewW*1.5)%(viewW*1.5)-viewW*0.25;
-      const ty=viewH*0.86;
-      if(hash01(i*4.9)<0.7){
-        const tw2=14+hash01(i*8.3)*10,th=20+hash01(i*2.7)*14;
-        ctx.fillStyle='rgba(34,26,52,0.95)';
-        roundRectPath(ctx,tx,ty-th,tw2,th,tw2*0.45);
-        ctx.fill();
-        ctx.fillRect(tx,ty-th*0.4,tw2,th*0.4);
-        ctx.strokeStyle='rgba(110,90,150,0.5)';
-        ctx.lineWidth=1.5;
-        ctx.beginPath();
-        ctx.moveTo(tx+tw2/2,ty-th*0.78);
-        ctx.lineTo(tx+tw2/2,ty-th*0.42);
-        ctx.moveTo(tx+tw2*0.28,ty-th*0.64);
-        ctx.lineTo(tx+tw2*0.72,ty-th*0.64);
-        ctx.stroke();
-      }else{
-        /* lantern post */
-        const flick=0.5+0.4*Math.abs(Math.sin(G.gameTime*7+i*2.4));
-        ctx.strokeStyle='rgba(30,22,46,0.95)';
-        ctx.lineWidth=3;
-        ctx.beginPath();
-        ctx.moveTo(tx,ty);
-        ctx.lineTo(tx,ty-44);
-        ctx.lineTo(tx+12,ty-44);
-        ctx.stroke();
-        const lg=ctx.createRadialGradient(tx+12,ty-38,1,tx+12,ty-38,16);
-        lg.addColorStop(0,'rgba(255,214,130,'+(0.85*flick).toFixed(2)+')');
-        lg.addColorStop(1,'rgba(255,180,90,0)');
-        ctx.fillStyle=lg;
-        ctx.fillRect(tx-6,ty-56,38,38);
-        ctx.fillStyle='rgba(255,226,150,'+flick.toFixed(2)+')';
-        ctx.fillRect(tx+9.5,ty-42,5,7);
-      }
-    }
+    /* (tombstones & lanterns now live in the world layer as decor) */
     for(let i=0;i<3;i++){
       const fy=viewH*(0.55+i*0.14);
       const fx=((G.gameTime*(12+i*7)+i*340)%(viewW+460))-230;
@@ -2800,6 +2890,76 @@ function drawGeometry(){
       ctx.strokeRect(w.x,w.y,w.w,w.h);
     }
     ctx.restore();
+  }
+}
+/* ---------------- CRACKED-GROUND DECALS ---------------- */
+function drawDecals(){
+  for(const d of decals){
+    const a=0.55*clamp((d.life-d.t)/1.2,0,1);
+    ctx.save();
+    ctx.translate(d.x,d.y);
+    if(d.flat)ctx.scale(1,0.4);
+    ctx.strokeStyle='rgba('+d.r+','+d.g+','+d.b+','+a.toFixed(3)+')';
+    ctx.lineWidth=1.8;
+    ctx.beginPath();
+    for(let k=0;k<4;k++){
+      const ca=d.rot+k*1.62;
+      ctx.moveTo(0,0);
+      ctx.lineTo(Math.cos(ca)*d.size,Math.sin(ca)*d.size);
+      ctx.moveTo(Math.cos(ca)*d.size*0.45,Math.sin(ca)*d.size*0.45);
+      ctx.lineTo(Math.cos(ca+0.5)*d.size*0.7,Math.sin(ca+0.5)*d.size*0.7);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/* ---------------- WORLD DECOR (non-interactive props) ---------------- */
+function drawDecor(){
+  for(const d of decor){
+    if(d.x<G.camX-70||d.x>G.camX+viewW+70)continue;
+    const s=d.s;
+    if(d.kind==='tomb'){
+      const tw=17*s,th=26*s;
+      ctx.fillStyle='rgba(40,32,62,0.96)';
+      roundRectPath(ctx,d.x-tw/2,d.y-th,tw,th,tw*0.45);
+      ctx.fill();
+      ctx.fillRect(d.x-tw/2,d.y-th*0.4,tw,th*0.4);
+      ctx.strokeStyle='rgba(125,102,170,0.6)';
+      ctx.lineWidth=1.6;
+      ctx.beginPath();
+      ctx.moveTo(d.x,d.y-th*0.76);
+      ctx.lineTo(d.x,d.y-th*0.4);
+      ctx.moveTo(d.x-tw*0.24,d.y-th*0.6);
+      ctx.lineTo(d.x+tw*0.24,d.y-th*0.6);
+      ctx.stroke();
+      ctx.fillStyle='rgba(20,14,34,0.6)';
+      ctx.beginPath();
+      ctx.ellipse(d.x,d.y,tw*0.7,3.4*s,0,0,TAU);
+      ctx.fill();
+    }else{
+      const ph=50*s;
+      const flick=0.5+0.4*Math.abs(Math.sin(G.gameTime*7+d.seed*2.4));
+      ctx.strokeStyle='rgba(28,22,46,0.96)';
+      ctx.lineWidth=3.5;
+      ctx.beginPath();
+      ctx.moveTo(d.x,d.y);
+      ctx.lineTo(d.x,d.y-ph);
+      ctx.lineTo(d.x+12*s,d.y-ph);
+      ctx.stroke();
+      const lx=d.x+12*s,ly=d.y-ph+7*s;
+      const lg=ctx.createRadialGradient(lx,ly,1,lx,ly,22*s);
+      lg.addColorStop(0,'rgba(255,214,130,'+(0.8*flick).toFixed(2)+')');
+      lg.addColorStop(1,'rgba(255,180,90,0)');
+      ctx.fillStyle=lg;
+      ctx.fillRect(lx-22*s,ly-22*s,44*s,44*s);
+      ctx.fillStyle='rgba(255,226,150,'+flick.toFixed(2)+')';
+      ctx.fillRect(lx-2.6*s,ly-3.4*s,5.2*s,8.4*s);
+      ctx.fillStyle='rgba(20,14,34,0.6)';
+      ctx.beginPath();
+      ctx.ellipse(d.x+3*s,d.y,9*s,3*s,0,0,TAU);
+      ctx.fill();
+    }
   }
 }
 function drawTelegraphs(){
@@ -3001,26 +3161,15 @@ function drawPickups(){
 
 /* ---------------- ENEMY RENDERING ---------------- */
 function drawRootAttack(en){
-  /* buried plant: slithering root bulge + locked eruption mound */
+  /* buried plant: a big dirt mound burrows toward the player,
+     leaving cracked ground and dirt spray in its wake */
   const dc=dirtColors();
   const onPop=en.rootState==='pop';
   const tx=onPop?en.lockX:en.tipX;
   const ty=onPop?en.lockY:en.tipY;
   ctx.save();
-  if(G.cfg.genre===0){
-    /* wavy root line trailing behind the bulge */
-    ctx.strokeStyle='rgba('+dc[0][0]+','+dc[0][1]+','+dc[0][2]+',0.75)';
-    ctx.lineWidth=4;
-    ctx.beginPath();
-    for(let k=0;k<=6;k++){
-      const lx=tx-k*13*(en.tipX<player.x?1:-1);
-      const ly=G.groundY-Math.abs(Math.sin(k*1.3+G.gameTime*9))*5;
-      if(k===0)ctx.moveTo(lx,ly);else ctx.lineTo(lx,ly);
-    }
-    ctx.stroke();
-  }
-  const pulse=onPop?(1+Math.sin(G.gameTime*22)*0.25):1;
-  const mr=(onPop?14:9)*pulse;
+  const pulse=onPop?(1+Math.sin(G.gameTime*22)*0.25):(1+Math.sin(G.gameTime*10)*0.08);
+  const mr=(onPop?22:15)*pulse;
   const mg2=ctx.createRadialGradient(tx,ty,1,tx,ty,mr+6);
   mg2.addColorStop(0,'rgba('+dc[1][0]+','+dc[1][1]+','+dc[1][2]+',0.85)');
   mg2.addColorStop(1,'rgba('+dc[0][0]+','+dc[0][1]+','+dc[0][2]+',0)');
@@ -3404,6 +3553,24 @@ function drawProjectiles(){
       ctx.arc(p.x,p.y,p.r+3,0,TAU);
       ctx.fill();
     }else if(p.kind==='yarn'){
+      /* unraveled string trailing behind the ball */
+      if(p.path&&p.path.length>1){
+        ctx.lineCap='round';
+        for(let k=1;k<p.path.length;k++){
+          const a=(k/p.path.length)*0.75;
+          ctx.strokeStyle='rgba(255,150,220,'+a.toFixed(2)+')';
+          ctx.lineWidth=2;
+          ctx.beginPath();
+          ctx.moveTo(p.path[k-1].x,p.path[k-1].y);
+          ctx.lineTo(p.path[k].x,p.path[k].y);
+          ctx.stroke();
+        }
+        ctx.strokeStyle='rgba(255,150,220,0.8)';
+        ctx.beginPath();
+        ctx.moveTo(p.path[p.path.length-1].x,p.path[p.path.length-1].y);
+        ctx.lineTo(p.x,p.y);
+        ctx.stroke();
+      }
       ctx.shadowColor='#ff5fd2';
       ctx.shadowBlur=14;
       ctx.fillStyle='#ff8bdd';
