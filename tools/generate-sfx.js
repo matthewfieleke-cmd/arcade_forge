@@ -318,6 +318,79 @@ const defs = [
   render('forge_open', () => norm(mix(
     tone(130, 0.2, 'tri', 0.3, [0.005, 0.08, 0.5, 0.1]),
     lp(noise(Math.floor(SR * 0.25)), 500).map((v, i) => v * Math.exp(-i / SR * 5) * 0.3)
+  ))),
+  render('tether_hum', () => {
+    const n = Math.floor(SR * 0.4);
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      out[i] = (Math.sin(2 * Math.PI * 160 * t) * 0.5 + Math.sin(2 * Math.PI * 242 * t + Math.sin(t * 30) * 0.6) * 0.35) *
+        env(t, 0.04, 0.1, 0.6, 0.15, 0.4) * 0.4;
+    }
+    return norm(out, 0.6);
+  }),
+  render('mine_beep', () => norm(tone(1450, 0.06, 'sq', 0.25, [0.001, 0.015, 0.3, 0.02]))),
+  render('vine_snap', () => {
+    const n = Math.floor(SR * 0.13);
+    const out = new Float32Array(n);
+    const nse = lp(noise(n), 3200);
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      out[i] = (nse[i] * 0.7 + Math.sin(2 * Math.PI * 240 * t) * 0.3) * Math.exp(-t * 26);
+    }
+    return norm(out);
+  }),
+  render('spore_pop', () => norm(mix(
+    tone(420, 0.07, 'sin', 0.3, [0.001, 0.02, 0.3, 0.03]),
+    lp(noise(Math.floor(SR * 0.09)), 1400).map((v, i) => v * Math.exp(-i / SR * 18) * 0.35)
+  ))),
+  render('vortex_pull', () => {
+    const n = Math.floor(SR * 0.55);
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      const f = 700 - t * 800;
+      out[i] = Math.sin(2 * Math.PI * Math.max(60, f) * t) * env(t, 0.05, 0.15, 0.5, 0.2, 0.55) * 0.35;
+    }
+    return norm(out, 0.7);
+  }),
+  render('soul_split', () => norm(mix(
+    tone(311, 0.4, 'sin', 0.25, [0.02, 0.12, 0.5, 0.2]),
+    tone(316, 0.4, 'sin', 0.25, [0.02, 0.12, 0.5, 0.2]),
+    tone(622, 0.3, 'sin', 0.15, [0.05, 0.1, 0.4, 0.15])
+  ))),
+  render('pillar_erupt', () => {
+    const n = Math.floor(SR * 0.3);
+    const out = new Float32Array(n);
+    const nse = lp(noise(n), 900);
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      out[i] = (nse[i] * 0.55 + Math.sin(2 * Math.PI * 70 * t) * 0.45) * Math.exp(-t * 7);
+    }
+    return norm(out);
+  }),
+  render('acid_spit', () => {
+    const n = Math.floor(SR * 0.12);
+    const out = lp(noise(n), 2400).map((v, i) => v * Math.exp(-i / SR * 16) * (0.3 + (i / n) * 0.4));
+    return norm(out, 0.7);
+  }),
+  render('clone_shatter', () => norm(mix(
+    tone(1100, 0.14, 'sin', 0.2, [0.001, 0.04, 0.3, 0.06]),
+    tone(1650, 0.12, 'sin', 0.16, [0.005, 0.04, 0.25, 0.05]),
+    lp(noise(Math.floor(SR * 0.14)), 5000).map((v, i) => v * Math.exp(-i / SR * 16) * 0.22)
+  ))),
+  render('buff_pulse', () => {
+    const n = Math.floor(SR * 0.18);
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      out[i] = Math.sin(2 * Math.PI * (300 + t * 700) * t) * env(t, 0.01, 0.06, 0.4, 0.08, 0.18) * 0.3;
+    }
+    return norm(out, 0.7);
+  }),
+  render('slam_warn', () => norm(mix(
+    tone(95, 0.45, 'tri', 0.35, [0.03, 0.15, 0.5, 0.2]),
+    tone(140, 0.4, 'sin', 0.2, [0.05, 0.12, 0.4, 0.18])
   )))
 ];
 
